@@ -119,11 +119,13 @@ def main():
     n_notes = x_train[0].shape[-1]
     batch_size = max_len
 
-    latent_unit_count = 256
+    latent_unit_count = 1024
     model = Sequential()
     model.add(LSTM(units=latent_unit_count, input_shape=(1, n_notes), name='encoder'))
+    # value mode
     model.add(Reshape((1, latent_unit_count)))
     model.add(LSTM(units=latent_unit_count, return_sequences=True, name='decoder'))
+    # sequence mode
     model.add(Dense(n_notes * 3))
     model.add(Reshape((3, n_notes)))
     model.add(Activation('softmax'))
@@ -133,20 +135,30 @@ def main():
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
     epochs = 10
-    for epoch in tqdm(range(epochs)):
-        for melody, harmony, val_melody, val_harmony in zip(
-            x_train, y_train, cycle(x_val), cycle(y_val)
-        ):
+    for epoch in tqdm(range(epochs), desc="Epoch"):
+        for i in range(len(x_train)):
+            melody, harmony, val_melody, val_harmony = (
+                x_train[i],
+                y_train[i],
+                x_val[i % len(x_val)],
+                y_val[i % len(y_val)],
+            )
             hist = model.fit(
                 melody,
                 harmony,
-                epochs=1,
+                epochs=5,
                 validation_data=(val_melody, val_harmony),
                 batch_size=max_len,
                 verbose=0,
             )
-            history["loss"] += hist.history["loss"]
-            history["val_loss"] += hist.history["val_loss"]
+            for loss in hist.history["loss"]:
+                if not history["loss"]:
+                    history["loss"].append(loss)
+                history["loss"].append(history["loss"][-1] * .999 + loss * .001)
+            for val_loss in hist.history["val_loss"]:
+                if not history["val_loss"]:
+                    history["val_loss"].append(val_loss)
+                history["val_loss"].append(history["val_loss"][-1]*.999+loss*.001)
             model.reset_states()
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
