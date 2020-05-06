@@ -121,7 +121,7 @@ def main():
 
     latent_unit_count = 256
     # Define an input sequence and process it.
-    encoder_inputs = Input(shape=(None, n_notes))
+    encoder_inputs = Input(shape=(1, n_notes))
     # Units set arbitrarily
     encoder = LSTM(units=latent_unit_count, return_state=True)
     encoder_outputs, state_h, state_c = encoder(encoder_inputs)
