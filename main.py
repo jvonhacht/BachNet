@@ -104,10 +104,10 @@ def main():
 
     model.add(
         tf.keras.layers.LSTM(
-            1000, return_sequences=True, input_shape=(x_train[0].shape[1:])
+            1000, return_sequences=True, input_shape=(x_train[0].shape[1:]), activation='tanh', recurrent_activation='sigmoid', recurrent_dropout=0, unroll=False, use_bias=True
         )
     )
-    model.add(tf.keras.layers.LSTM(46, return_sequences=True))
+    model.add(tf.keras.layers.LSTM(46, return_sequences=True, activation='tanh', recurrent_activation='sigmoid', recurrent_dropout=0, unroll=False, use_bias=True))
     model.add(tf.keras.layers.Reshape((reversed(input_dim))))
     model.add(tf.keras.layers.Dense(3))
     model.add(tf.keras.layers.Reshape(output_dim))
@@ -118,7 +118,7 @@ def main():
     history = {"loss": [], "val_loss": []}
     epochs = 10
     for epoch in tqdm(range(epochs), desc="Epoch"):
-        for i in tqdm(range(len(x_train)), desc="Piece"):
+        for i in range(len(x_train)):
             melody, harmony, val_melody, val_harmony = (
                 x_train[i],
                 y_train[i],
@@ -133,8 +133,14 @@ def main():
                 validation_data=(val_melody, val_harmony),
                 verbose=0,
             )
-            history["loss"] += hist.history["loss"]
-            history["val_loss"] += hist.history["val_loss"]
+            for loss in hist.history["loss"]:
+                if not history["loss"]:
+                    history["loss"].append(loss)
+                history["loss"].append(history["loss"][-1] * .999 + loss * .001)
+            for val_loss in hist.history["val_loss"]:
+                if not history["val_loss"]:
+                    history["val_loss"].append(val_loss)
+                history["val_loss"].append(history["val_loss"][-1]*.999+loss*.001)
             model.reset_states()
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
