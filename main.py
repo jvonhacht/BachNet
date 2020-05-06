@@ -9,12 +9,12 @@ from itertools import cycle
 # Fix seed for reproducibility
 tf.random.set_seed(0)
 
-gpus = tf.config.experimental.list_physical_devices('GPU')
+gpus = tf.config.experimental.list_physical_devices("GPU")
 if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            logical_gpus = tf.config.experimental.list_logical_devices("GPU")
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
     except RuntimeError as e:
         print(e)
@@ -68,7 +68,15 @@ class OneHotEncoder:
         )
 
     def softmax_to_midi(self, softmax: np.ndarray) -> float:
-        one_hot = np.asarray([[self.midi_note_one_hot(np.random.choice(self.n_notes, p=voice)) for voice in beat]for beat in softmax])
+        one_hot = np.asarray(
+            [
+                [
+                    self.midi_note_one_hot(np.random.choice(self.n_notes, p=voice))
+                    for voice in beat
+                ]
+                for beat in softmax
+            ]
+        )
         return self.decode_song(one_hot)
 
 
@@ -77,43 +85,63 @@ def main():
     train, test, val = data["train"], data["test"], data["valid"]
 
     encoder = OneHotEncoder(train, test, val)
-    one_hot_train, one_hot_test, one_hot_val = [[encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)]
-    
+    one_hot_train, one_hot_test, one_hot_val = [
+        [encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)
+    ]
+
     model = tf.keras.Sequential()
     x_train, x_test, x_val = [
         [x[:, 0:1, :] for x in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
-    y_train, y_test, y_val = [[y[:, 1:, :] for y in dataset]
+    y_train, y_test, y_val = [
+        [y[:, 1:, :] for y in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
     input_dim = x_train[0].shape[1:]
     output_dim = y_train[0].shape[1:]
-    batch_size = 8
+    batch_size = 32
 
-    model.add(tf.keras.layers.LSTM(46, input_shape=(x_train[0].shape[1:]), return_sequences=True))
+    model.add(
+        tf.keras.layers.LSTM(
+            1000, return_sequences=True, input_shape=(x_train[0].shape[1:])
+        )
+    )
+    model.add(tf.keras.layers.LSTM(46, return_sequences=True))
     model.add(tf.keras.layers.Reshape((reversed(input_dim))))
     model.add(tf.keras.layers.Dense(3))
     model.add(tf.keras.layers.Reshape(output_dim))
-    model.add(tf.keras.layers.Activation('softmax'))
+    model.add(tf.keras.layers.Activation("softmax"))
     model.summary()
-    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    model.compile(loss="categorical_crossentropy", optimizer="adam")
     # We train separately on each song, but the weights are maintained.
-    history = {'loss': [], 'val_loss': []}
+    history = {"loss": [], "val_loss": []}
     epochs = 10
-    for epoch in range(epochs):
-        for melody, harmony, val_melody, val_harmony in zip(x_train, y_train, cycle(x_val), cycle(y_val)):
-            hist = model.fit(melody, harmony, epochs=1, batch_size=batch_size, validation_data=(val_melody, val_harmony))
-            history['loss'] += hist.history['loss']
-            history['val_loss'] += hist.history['val_loss']
+    for epoch in tqdm(range(epochs), desc="Epoch"):
+        for i in tqdm(range(len(x_train)), desc="Piece"):
+            melody, harmony, val_melody, val_harmony = (
+                x_train[i],
+                y_train[i],
+                x_val[i % len(x_val)],
+                y_val[i % len(y_val)],
+            )
+            hist = model.fit(
+                melody,
+                harmony,
+                epochs=5,
+                batch_size=batch_size,
+                validation_data=(val_melody, val_harmony),
+                verbose=0,
+            )
+            history["loss"] += hist.history["loss"]
+            history["val_loss"] += hist.history["val_loss"]
             model.reset_states()
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
-    plt.plot(history['loss'], label='Training loss')
-    plt.plot(history['val_loss'], label='Validation loss')
+    plt.plot(history["loss"], label="Training loss")
+    plt.plot(history["val_loss"], label="Validation loss")
     plt.legend()
     plt.show()
-
 
 
 if __name__ == "__main__":
