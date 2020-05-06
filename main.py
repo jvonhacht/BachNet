@@ -4,6 +4,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
+from itertools import cycle
 
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -69,8 +70,13 @@ def main():
     one_hot_train, one_hot_test, one_hot_val = [[encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)]
     
     model = tf.keras.Sequential()
-    x_train = [x[:, 0:1, :] for x in one_hot_train]
-    y_train = [y[:, 1:, :] for y in one_hot_train]
+    x_train, x_test, x_val = [
+        [x[:, 0:1, :] for x in dataset]
+        for dataset in (one_hot_train, one_hot_test, one_hot_val)
+    ]
+    y_train, y_test, y_val = [[y[:, 1:, :] for y in dataset]
+        for dataset in (one_hot_train, one_hot_test, one_hot_val)
+    ]
     input_dim = x_train[0].shape[1:]
     output_dim = y_train[0].shape[1:]
     batch_size = 8
@@ -83,14 +89,19 @@ def main():
     model.summary()
     model.compile(loss='categorical_crossentropy', optimizer='adam')
     # We train separately on each song, but the weights are maintained.
-    loss = []
-    for piece, harmony in zip(x_train, y_train):
-        hist = model.fit(piece, harmony, epochs=1, batch_size=batch_size)
-        loss += hist.history['loss']
-        model.reset_states()
+    history = {'loss': [], 'val_loss': []}
+    epochs = 10
+    for epoch in range(epochs):
+        for melody, harmony, val_melody, val_harmony in zip(x_train, y_train, cycle(x_val), cycle(y_val)):
+            hist = model.fit(melody, harmony, epochs=1, batch_size=batch_size, validation_data=(val_melody, val_harmony))
+            history['loss'] += hist.history['loss']
+            history['val_loss'] += hist.history['val_loss']
+            model.reset_states()
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
-    plt.plot(loss)
+    plt.plot(history['loss'], label='Training loss')
+    plt.plot(history['val_loss'], label='Validation loss')
+    plt.legend()
     plt.show()
 
 
