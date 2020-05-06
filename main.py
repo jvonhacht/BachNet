@@ -27,6 +27,7 @@ class OneHotEncoder:
                 ]
             )
         )
+        self.n_notes = self.highest - self.lowest + 1
 
     def encode_song(self, piece: Iterable[Tuple[float]]) -> np.ndarray:
         encoded = np.asarray(
@@ -55,40 +56,43 @@ class OneHotEncoder:
             [[self.one_hot_to_midi(note) for note in beat] for beat in piece]
         )
 
+    def softmax_to_midi(self, softmax: np.ndarray) -> float:
+        one_hot = np.asarray([[self.midi_note_one_hot(np.random.choice(self.n_notes, p=voice)) for voice in beat]for beat in softmax])
+        return self.decode_song(one_hot)
+
 
 def main():
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
     train, test, val = data["train"], data["test"], data["valid"]
 
-    max_len = max(map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val)))
-
-    dim = ((len(train), max_len) + train[0].shape[1:])
-    
-    padded_train = np.zeros(dim)
-    for idx, piece in enumerate(train):
-        padded_train[idx, :piece.shape[0], :piece.shape[1]] = piece
-    x_train = padded_train[:,:,0:1]
-    y_train = padded_train[:, :, 1:]
+    encoder = OneHotEncoder(train, test, val)
+    one_hot_train, one_hot_test, one_hot_val = [[encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)]
     
     model = tf.keras.Sequential()
-    model.add(tf.keras.layers.LSTM(32, input_shape=x_train.shape[1:],return_sequences=True ))
-    model.add(tf.keras.layers.Dense(3, input_shape=(x_train.shape[1:])))
+    x_train = [x[:, 0:1, :] for x in one_hot_train]
+    y_train = [y[:, 1:, :] for y in one_hot_train]
+    input_dim = x_train[0].shape[1:]
+    output_dim = y_train[0].shape[1:]
+    batch_size = 8
+
+    model.add(tf.keras.layers.LSTM(46, input_shape=(x_train[0].shape[1:]), return_sequences=True))
+    model.add(tf.keras.layers.Reshape((reversed(input_dim))))
+    model.add(tf.keras.layers.Dense(3))
+    model.add(tf.keras.layers.Reshape(output_dim))
+    model.add(tf.keras.layers.Activation('softmax'))
+    model.summary()
     model.compile(loss='categorical_crossentropy', optimizer='adam')
-    model.fit(x_train, y_train, epochs=1, batch_size=8)
-    y_hat = model.predict(x_train)
-    pass
-    # x_val = np.asarray(
-    #     [np.asarray([harmony[0] for harmony in piece]) for piece in one_hot_val]
-    # )
-    # y_val = np.asarray(
-    #     [np.asarray([harmony[1:] for harmony in piece]) for piece in one_hot_val]
-    # )
-    # x_test = np.asarray(
-    #     [np.asarray([harmony[0] for harmony in piece]) for piece in one_hot_test]
-    # )
-    # y_test = np.asarray(
-    #     [np.asarray([harmony[1:] for harmony in piece]) for piece in one_hot_test]
-    # )
+    # We train separately on each song, but the weights are maintained.
+    loss = []
+    for piece, harmony in zip(x_train, y_train):
+        hist = model.fit(piece, harmony, epochs=1, batch_size=batch_size)
+        loss += hist.history['loss']
+        model.reset_states()
+    y_hat = model.predict(x_train[0])
+    song = encoder.softmax_to_midi(y_hat)
+    plt.plot(loss)
+    plt.show()
+
 
 
 if __name__ == "__main__":
