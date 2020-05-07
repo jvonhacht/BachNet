@@ -133,7 +133,7 @@ def main():
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
     epochs = 10
-    for epoch in range(epochs):
+    for epoch in tqdm(range(epochs)):
         for melody, harmony, val_melody, val_harmony in zip(
             x_train, y_train, cycle(x_val), cycle(y_val)
         ):
@@ -143,6 +143,7 @@ def main():
                 epochs=1,
                 validation_data=(val_melody, val_harmony),
                 batch_size=max_len,
+                verbose=0,
             )
             history["loss"] += hist.history["loss"]
             history["val_loss"] += hist.history["val_loss"]
