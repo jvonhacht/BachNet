@@ -8,6 +8,9 @@ from tensorflow.keras.layers import (
     Activation,
     RepeatVector,
     Input,
+    Bidirectional,
+    Embedding,
+    TimeDistributed
 )
 from tensorflow.keras import Model, Sequential
 import matplotlib.pyplot as plt
@@ -95,9 +98,13 @@ def main():
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
     train, test, val = data["train"], data["test"], data["valid"]
 
-    max_len = max(
-        map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
+    min_len = max(
+        map(lambda dataset: min(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )
+    min_len = 100
+    train = [song[0:min_len] for song in train]
+    test = [song[0:min_len] for song in test]
+    val = [song[0:min_len] for song in val]
     # for dataset in (train, test, val):
     #     for i, piece in enumerate(dataset):
     #         padded = np.nan * np.ones((max_len, 4))
@@ -110,34 +117,35 @@ def main():
     ]
 
     x_train, x_test, x_val = [
-        [x[:, 0:1, :] for x in dataset]
+        [x[:, 0:1, :].squeeze() for x in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
     y_train, y_test, y_val = [
-        [y[:, 1:, :] for y in dataset]
+        [y[:, 3:4, :].squeeze() for y in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
+    x_train = np.rollaxis(np.dstack(x_train), -1)
+    y_train = np.rollaxis(np.dstack(y_train), -1)
+    x_val = np.rollaxis(np.dstack(x_val), -1)
+    y_val = np.rollaxis(np.dstack(y_val), -1)
+
     output_dim = y_train[0].shape[1:]
     n_notes = x_train[0].shape[-1]
-    batch_size = max_len
+    batch_size = min_len
 
-    latent_unit_count = 1024
+    latent_unit_count = 256
     model = Sequential()
-    model.add(LSTM(units=latent_unit_count, input_shape=(1, n_notes), name='encoder'))
-    # value mode
-    model.add(Reshape((1, latent_unit_count)))
-    model.add(LSTM(units=latent_unit_count, return_sequences=True, name='decoder'))
-    # sequence mode
-    model.add(Dense(n_notes * 3))
-    model.add(Reshape((3, n_notes)))
+    model.add(LSTM(256, return_sequences=True, input_shape=(min_len, n_notes)))
+    model.add(LSTM(256, return_sequences=True))
+    model.add(Dense(n_notes))
     model.add(Activation('softmax'))
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     model.summary()
-    tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
+    #tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
 
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
-    epochs = 5
+    epochs = 20
     for epoch in tqdm(range(epochs), desc="Epoch"):
         for i in range(len(x_train)):
             melody, harmony, val_melody, val_harmony = (
@@ -146,12 +154,16 @@ def main():
                 x_val[i % len(x_val)],
                 y_val[i % len(y_val)],
             )
+            melody = melody.reshape((1, 100, 46))
+            harmony = harmony.reshape((1, 100, 46))
+            val_melody = val_melody.reshape((1, 100, 46))
+            val_harmony = val_harmony.reshape((1, 100, 46))
             hist = model.fit(
                 melody,
                 harmony,
-                epochs=5,
+                epochs=4,
                 validation_data=(val_melody, val_harmony),
-                batch_size=max_len,
+                batch_size=min_len,
                 verbose=0,
             )
             for loss in hist.history["loss"]:
@@ -165,11 +177,11 @@ def main():
             model.reset_states()
     model.save_weights("model.h5")
 
-    y_hat = model.predict(x_train[0])
-    song = encoder.softmax_to_midi(y_hat)
+    y_hat = model.predict(x_train[0].reshape((1, 100, 46)))
+    song = encoder.softmax_to_midi(y_hat).flatten()
 
     midi_converter = MidiConverter()
-    melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
+    melody_and_song = [(melody[0], harmony) for melody, harmony in zip(train[0], song)]
     midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
     original_song = train[0]
     midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
