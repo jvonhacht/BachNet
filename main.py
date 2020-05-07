@@ -15,6 +15,7 @@ from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from itertools import cycle
 
+from midi import MidiConverter
 # Fix seed for reproducibility
 tf.random.set_seed(0)
 
@@ -96,11 +97,11 @@ def main():
     max_len = max(
         map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )
-    for dataset in (train, test, val):
-        for i, piece in enumerate(dataset):
-            padded = np.nan * np.ones((max_len, 4))
-            padded[: piece.shape[0], :] = piece
-            dataset[i] = padded
+    # for dataset in (train, test, val):
+    #     for i, piece in enumerate(dataset):
+    #         padded = np.nan * np.ones((max_len, 4))
+    #         padded[: piece.shape[0], :] = piece
+    #         dataset[i] = padded
 
     encoder = OneHotEncoder(train, test, val)
     one_hot_train, one_hot_test, one_hot_val = [
