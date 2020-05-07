@@ -124,7 +124,7 @@ def main():
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
-    epochs = 1
+    epochs = 2
     for epoch in tqdm(range(epochs), desc="Epoch"):
         for i in tqdm(range(len(x_train)), desc="Epoch progress"):
             melody, harmony, val_melody, val_harmony = (
@@ -150,12 +150,14 @@ def main():
                     history["val_loss"].append(val_loss)
                 history["val_loss"].append(history["val_loss"][-1]*.999+loss*.001)
             model.reset_states()
-            break
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
 
     midi_converter = MidiConverter()
-    midi_converter.convert_to_midi(piece, 'test', resolution=1/4, tempo=60)
+    melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
+    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
+    original_song = train[0]
+    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
 
     plt.plot(history["loss"], label="Training loss")
     plt.plot(history["val_loss"], label="Validation loss")
