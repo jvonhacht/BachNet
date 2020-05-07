@@ -116,9 +116,9 @@ def main():
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
-    epochs = 10
+    epochs = 1
     for epoch in tqdm(range(epochs), desc="Epoch"):
-        for i in range(len(x_train)):
+        for i in tqdm(range(len(x_train)), desc="Epoch progress"):
             melody, harmony, val_melody, val_harmony = (
                 x_train[i],
                 y_train[i],
