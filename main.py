@@ -39,7 +39,7 @@ def main():
     piece = train[10]
     #test3 = [(harmony[0],) for harmony in piece]
     midi_converter = MidiConverter()
-    midi_converter.convert_to_midi(piece, 'test', resolution=1/16)
+    midi_converter.convert_to_midi(piece, 'test', resolution=1/4, tempo=60)
 
     encoder = OneHotEncoder(train, test, val)
     raw_song = train[0]

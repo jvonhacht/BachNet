@@ -2,9 +2,9 @@ from midiutil import MIDIFile
 import numpy as np
 
 class MidiConverter:
-    def convert_to_midi(self, piece: np.ndarray, name, resolution=1/16):
+    def convert_to_midi(self, piece: np.ndarray, name, resolution=1/4, tempo=60):
         midi_file = MIDIFile(1)
-        midi_file.addTempo(0, 0, 60)
+        midi_file.addTempo(0, 0, tempo)
         # keeps track of previous note to know if note is held
         previous_notes = list(piece[0])
         # keeps track of the duration the note has been held
