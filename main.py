@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from itertools import cycle
+from midi import MidiConverter
 
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -18,7 +19,6 @@ if gpus:
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
     except RuntimeError as e:
         print(e)
-
 
 class OneHotEncoder:
     def __init__(self, train, test, val):
@@ -81,8 +81,16 @@ class OneHotEncoder:
 
 
 def main():
-    data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
-    train, test, val = data["train"], data["test"], data["valid"]
+    data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding='latin1')
+    train, test, val = data['train'], data['test'], data['valid']
+    
+    """
+    # test midi creation
+    piece = train[10]
+    #test3 = [(harmony[0],) for harmony in piece]
+    midi_converter = MidiConverter()
+    midi_converter.convert_to_midi(piece, 'test', resolution=1/4, tempo=60)
+    """
 
     encoder = OneHotEncoder(train, test, val)
     one_hot_train, one_hot_test, one_hot_val = [
@@ -142,8 +150,13 @@ def main():
                     history["val_loss"].append(val_loss)
                 history["val_loss"].append(history["val_loss"][-1]*.999+loss*.001)
             model.reset_states()
+            break
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
+
+    midi_converter = MidiConverter()
+    midi_converter.convert_to_midi(piece, 'test', resolution=1/4, tempo=60)
+
     plt.plot(history["loss"], label="Training loss")
     plt.plot(history["val_loss"], label="Validation loss")
     plt.legend()
