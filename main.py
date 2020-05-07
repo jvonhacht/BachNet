@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 from itertools import cycle
 
 from midi import MidiConverter
+import sys
 # Fix seed for reproducibility
 tf.random.set_seed(0)
 
@@ -132,10 +133,11 @@ def main():
     model.add(Activation('softmax'))
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     model.summary()
+    tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
 
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
-    epochs = 10
+    epochs = 5
     for epoch in tqdm(range(epochs), desc="Epoch"):
         for i in range(len(x_train)):
             melody, harmony, val_melody, val_harmony = (
@@ -159,10 +161,19 @@ def main():
             for val_loss in hist.history["val_loss"]:
                 if not history["val_loss"]:
                     history["val_loss"].append(val_loss)
-                history["val_loss"].append(history["val_loss"][-1]*.999+loss*.001)
+                history["val_loss"].append(history["val_loss"][-1]*.999+val_loss*.001)
             model.reset_states()
+    model.save_weights("model.h5")
+
     y_hat = model.predict(x_train[0])
     song = encoder.softmax_to_midi(y_hat)
+
+    midi_converter = MidiConverter()
+    melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
+    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
+    original_song = train[0]
+    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
+
     plt.plot(history["loss"], label="Training loss")
     plt.plot(history["val_loss"], label="Validation loss")
     plt.legend()
