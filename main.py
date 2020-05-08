@@ -15,6 +15,7 @@ from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from itertools import cycle
 
+from enum import Enum, auto
 from midi import MidiConverter
 import sys
 # Fix seed for reproducibility
@@ -29,6 +30,12 @@ if gpus:
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
     except RuntimeError as e:
         print(e)
+
+
+class _EncoderNoteType(Enum):
+    NOTE = auto()
+    REST = auto()
+    REPEAT = auto()
 
 
 class OneHotEncoder:
@@ -49,46 +56,80 @@ class OneHotEncoder:
                 ]
             )
         )
-        self.n_notes = self.highest - self.lowest + 1
+        self.n_notes = self.highest - self.lowest + 1 + 2
 
     def encode_song(self, piece: Iterable[Tuple[float]]) -> np.ndarray:
-        encoded = np.asarray(
-            [[self.midi_note_one_hot(note) for note in beat] for beat in piece]
-        )
-        return encoded
+        encoded = []
+        previous_notes = [np.nan] * 4
+        for beat in piece:
+            encoded_beat = []
+            for i, (note, previous) in enumerate(zip(beat, previous_notes)):
+                if note == previous:
+                    encoded_beat.append(self.midi_note_one_hot(note, _EncoderNoteType.REPEAT))
+                else:
+                    previous_notes[i] = note
+                    encoded_beat.append(self.midi_note_one_hot(note, note_type=_EncoderNoteType.REST if np.isnan(note) else _EncoderNoteType.NOTE))
+            encoded.append(encoded_beat)
+        return np.asarray(encoded)
 
-    def midi_note_one_hot(self, note: float) -> np.ndarray:
+    def midi_note_one_hot(self, note: float, note_type: _EncoderNoteType) -> np.ndarray:
         """Convert a midi note to one-hot encoding in shape (K,)"""
-        one_hot = np.zeros((self.highest - self.lowest + 1,))
-        if np.isnan(note):
-            return one_hot
-        else:
+        one_hot = np.zeros((self.highest - self.lowest + 1 + 2,))
+        if note_type is _EncoderNoteType.REST:
+            one_hot[0] = 1
+        elif note_type is _EncoderNoteType.NOTE:
             one_hot[int(note) - self.lowest] = 1
+        elif note_type is _EncoderNoteType.REPEAT:
+            one_hot[-1] = 1
+        else:
+            raise SyntaxError("Unsupported note type")
         return one_hot
 
-    def one_hot_to_midi(self, one_hot: np.ndarray) -> float:
+    def one_hot_to_midi(self, one_hot: np.ndarray):
         nonzero = np.nonzero(one_hot)
         if not nonzero:
-            return np.nan
+            return np.nan, _EncoderNoteType.REST
         idx = nonzero[0].item()
-        return float(idx) + self.lowest
+        if idx == len(one_hot) - 1:
+            # Final index is repeat
+            return idx, _EncoderNoteType.REPEAT
+        if idx == 0:
+            return np.nan, _EncoderNoteType.REST
+        return float(idx) + self.lowest + 1, _EncoderNoteType.NOTE
 
     def decode_song(self, piece: np.ndarray) -> Iterable[Tuple[float]]:
-        return np.asarray(
-            [[self.one_hot_to_midi(note) for note in beat] for beat in piece]
-        )
+        decoded = []
+        previous_notes = [np.nan] * 4
+        for beat in piece:
+            decoded_beat = []
+            for i, (one_hot, previous) in enumerate(zip(beat, previous_notes)):
+                note, note_type = self.one_hot_to_midi(one_hot)
+                if note_type == _EncoderNoteType.REPEAT:
+                    decoded_beat.append(previous)
+                elif note_type == _EncoderNoteType.REST:
+                    decoded_beat.append(np.nan)
+                elif note_type == _EncoderNoteType.NOTE:
+                    previous_notes[i] = note
+                    decoded_beat.append(note)
+            decoded.append(decoded_beat)
+        return np.asarray(decoded)
 
     def softmax_to_midi(self, softmax: np.ndarray) -> float:
-        one_hot = np.asarray(
-            [
-                [
-                    self.midi_note_one_hot(np.random.choice(self.n_notes, p=voice))
-                    for voice in beat
-                ]
-                for beat in softmax
-            ]
-        )
-        return self.decode_song(one_hot)
+        song = []
+        previous_notes = [np.nan] * 4
+        for beat in softmax:
+            notes = [np.random.choice(self.n_notes, p=voice) for voice in beat]
+            for i, (note, previous) in enumerate(zip(notes, previous_notes)):
+                if note == 0:
+                    notes[i] = np.nan
+                elif note == self.n_notes - 1:
+                    notes[i] = previous
+                else:
+                    note = note + self.lowest + 1
+                    previous_notes[i] = note
+                    notes[i] = note
+            song.append(notes)
+        return np.asarray(song)
 
 
 def main():
@@ -120,64 +161,65 @@ def main():
     output_dim = y_train[0].shape[1:]
     n_notes = x_train[0].shape[-1]
     batch_size = max_len
-
     latent_unit_count = 1024
-    model = Sequential()
-    model.add(LSTM(units=latent_unit_count, input_shape=(1, n_notes), name='encoder'))
-    # value mode
-    model.add(Reshape((1, latent_unit_count)))
-    model.add(LSTM(units=latent_unit_count, return_sequences=True, name='decoder'))
-    # sequence mode
-    model.add(Dense(n_notes * 3))
-    model.add(Reshape((3, n_notes)))
-    model.add(Activation('softmax'))
-    model.compile(loss="categorical_crossentropy", optimizer="adam")
-    model.summary()
-    tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
+    for latent_unit_count in tqdm((2**8, 2**9, 2**10, 2**11), desc='Model'):
+        model = Sequential()
+        model.add(LSTM(units=latent_unit_count, input_shape=(1, n_notes), name='encoder'))
+        # value mode
+        model.add(Reshape((1, latent_unit_count)))
+        model.add(LSTM(units=latent_unit_count, return_sequences=True, name='decoder'))
+        # sequence mode
+        model.add(Dense(n_notes * 3))
+        model.add(Reshape((3, n_notes)))
+        model.add(Activation('softmax'))
+        model.compile(loss="categorical_crossentropy", optimizer="adam")
+        # model.summary()
+        # tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
 
-    # We train separately on each song, but the weights are maintained.
-    history = {"loss": [], "val_loss": []}
-    epochs = 5
-    for epoch in tqdm(range(epochs), desc="Epoch"):
-        for i in range(len(x_train)):
-            melody, harmony, val_melody, val_harmony = (
-                x_train[i],
-                y_train[i],
-                x_val[i % len(x_val)],
-                y_val[i % len(y_val)],
-            )
-            hist = model.fit(
-                melody,
-                harmony,
-                epochs=5,
-                validation_data=(val_melody, val_harmony),
-                batch_size=max_len,
-                verbose=0,
-            )
-            for loss in hist.history["loss"]:
-                if not history["loss"]:
-                    history["loss"].append(loss)
-                history["loss"].append(history["loss"][-1] * .999 + loss * .001)
-            for val_loss in hist.history["val_loss"]:
-                if not history["val_loss"]:
-                    history["val_loss"].append(val_loss)
-                history["val_loss"].append(history["val_loss"][-1]*.999+val_loss*.001)
-            model.reset_states()
-    model.save_weights("model.h5")
+        # We train separately on each song, but the weights are maintained.
+        history = {"loss": [], "val_loss": []}
+        epochs = 50
+        for epoch in tqdm(range(epochs), desc="Epoch"):
+            for i in range(len(x_train)):
+                melody, harmony, val_melody, val_harmony = (
+                    x_train[i],
+                    y_train[i],
+                    x_val[i % len(x_val)],
+                    y_val[i % len(y_val)],
+                )
+                batch_size = melody.shape[0]
+                hist = model.fit(
+                    melody,
+                    harmony,
+                    epochs=1,
+                    validation_data=(val_melody, val_harmony),
+                    batch_size=32,
+                    verbose=0,
+                )
+                for loss in hist.history["loss"]:
+                    if not history["loss"]:
+                        history["loss"].append(loss)
+                    history["loss"].append(history["loss"][-1] * .999 + loss * .001)
+                for val_loss in hist.history["val_loss"]:
+                    if not history["val_loss"]:
+                        history["val_loss"].append(val_loss)
+                    history["val_loss"].append(history["val_loss"][-1]*.999+val_loss*.001)
+                model.reset_states()
+        model.save_weights(f"{latent_unit_count}_units_model.h5")
 
-    y_hat = model.predict(x_train[0])
-    song = encoder.softmax_to_midi(y_hat)
+        y_hat = model.predict(x_train[0])
+        song = encoder.softmax_to_midi(y_hat)
 
-    midi_converter = MidiConverter()
-    melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
-    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
-    original_song = train[0]
-    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
+        midi_converter = MidiConverter()
+        melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
+        midi_converter.convert_to_midi(melody_and_song, f'{latent_unit_count}_units_model_out', resolution=1/4, tempo=60)
+        original_song = train[0]
+        midi_converter.convert_to_midi(original_song, f'{latent_unit_count}_original_out', resolution=1/4, tempo=60)
 
-    plt.plot(history["loss"], label="Training loss")
-    plt.plot(history["val_loss"], label="Validation loss")
-    plt.legend()
-    plt.show()
+        plt.plot(history["loss"], label="Training loss")
+        plt.plot(history["val_loss"], label="Validation loss")
+        plt.legend()
+        plt.savefig(f'{latent_unit_count}_units.png', dpi=300)
 
 
 if __name__ == "__main__":
