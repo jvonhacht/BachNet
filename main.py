@@ -10,9 +10,11 @@ from tensorflow.keras.layers import (
     Input,
     Bidirectional,
     Embedding,
-    TimeDistributed
+    TimeDistributed,
+    Dropout
 )
 from tensorflow.keras import Model, Sequential
+from tensorflow.keras import preprocessing
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
@@ -44,6 +46,7 @@ class OneHotEncoder:
                 ]
             )
         )
+
         self.highest = int(
             max(
                 [
@@ -98,24 +101,21 @@ def main():
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
     train, test, val = data["train"], data["test"], data["valid"]
 
-    min_len = max(
-        map(lambda dataset: min(map(lambda x: x.shape[0], dataset)), (train, test, val))
+    # pad data
+    max_len = max(
+        map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )
-    min_len = 100
-    train = [song[0:min_len] for song in train]
-    test = [song[0:min_len] for song in test]
-    val = [song[0:min_len] for song in val]
-    # for dataset in (train, test, val):
-    #     for i, piece in enumerate(dataset):
-    #         padded = np.nan * np.ones((max_len, 4))
-    #         padded[: piece.shape[0], :] = piece
-    #         dataset[i] = padded
+    for dataset in (train, test, val):
+        for i, piece in enumerate(dataset):
+            padded = np.nan * np.ones((max_len, 4))
+            padded[: piece.shape[0], :] = piece
+            dataset[i] = padded
 
+    # one hot encode data
     encoder = OneHotEncoder(train, test, val)
     one_hot_train, one_hot_test, one_hot_val = [
         [encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)
     ]
-
     x_train, x_test, x_val = [
         [x[:, 0:1, :].squeeze() for x in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
@@ -124,19 +124,27 @@ def main():
         [y[:, 3:4, :].squeeze() for y in dataset]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
+
+    # convert from shape [(seq_len, n_notes)] to (N, seq_len, n_notes)
     x_train = np.rollaxis(np.dstack(x_train), -1)
     y_train = np.rollaxis(np.dstack(y_train), -1)
+    x_test = np.rollaxis(np.dstack(x_test), -1)
+    y_test = np.rollaxis(np.dstack(y_test), -1)
     x_val = np.rollaxis(np.dstack(x_val), -1)
     y_val = np.rollaxis(np.dstack(y_val), -1)
 
     output_dim = y_train[0].shape[1:]
     n_notes = x_train[0].shape[-1]
-    batch_size = min_len
+    batch_size = 32
 
-    latent_unit_count = 256
     model = Sequential()
-    model.add(LSTM(256, return_sequences=True, input_shape=(min_len, n_notes)))
-    model.add(LSTM(256, return_sequences=True))
+    model.add(LSTM(512, return_sequences=True, input_shape=(max_len, n_notes)))
+    model.add(Dropout(0.3))
+    model.add(LSTM(512, return_sequences=True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(512, return_sequences=True))
+    model.add(Dense(256))
+    model.add(Dropout(0.3))
     model.add(Dense(n_notes))
     model.add(Activation('softmax'))
     model.compile(loss="categorical_crossentropy", optimizer="adam")
@@ -145,7 +153,7 @@ def main():
 
     # We train separately on each song, but the weights are maintained.
     history = {"loss": [], "val_loss": []}
-    epochs = 20
+    epochs = 10
     for epoch in tqdm(range(epochs), desc="Epoch"):
         for i in range(len(x_train)):
             melody, harmony, val_melody, val_harmony = (
@@ -154,16 +162,17 @@ def main():
                 x_val[i % len(x_val)],
                 y_val[i % len(y_val)],
             )
-            melody = melody.reshape((1, 100, 46))
-            harmony = harmony.reshape((1, 100, 46))
-            val_melody = val_melody.reshape((1, 100, 46))
-            val_harmony = val_harmony.reshape((1, 100, 46))
+            melody = melody.reshape((1, max_len, 46))
+            harmony = harmony.reshape((1, max_len, 46))
+            val_melody = val_melody.reshape((1, max_len, 46))
+            val_harmony = val_harmony.reshape((1, max_len, 46))
+
             hist = model.fit(
                 melody,
                 harmony,
                 epochs=4,
                 validation_data=(val_melody, val_harmony),
-                batch_size=min_len,
+                batch_size=batch_size,
                 verbose=0,
             )
             for loss in hist.history["loss"]:
