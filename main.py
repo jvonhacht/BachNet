@@ -11,7 +11,8 @@ from tensorflow.keras.layers import (
     Bidirectional,
     Embedding,
     TimeDistributed,
-    Dropout
+    Dropout,
+    RepeatVector
 )
 from tensorflow.keras import Model, Sequential
 from tensorflow.keras import preprocessing
@@ -102,14 +103,19 @@ def main():
     train, test, val = data["train"], data["test"], data["valid"]
 
     # pad data
-    max_len = max(
-        map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
+    max_len = min(
+        map(lambda dataset: min(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )
+    train = [song[0:max_len] for song in train]
+    test = [song[0:max_len] for song in test]
+    val = [song[0:max_len] for song in val]
+    """
     for dataset in (train, test, val):
         for i, piece in enumerate(dataset):
             padded = np.nan * np.ones((max_len, 4))
             padded[: piece.shape[0], :] = piece
             dataset[i] = padded
+    """
 
     # one hot encode data
     encoder = OneHotEncoder(train, test, val)
@@ -135,57 +141,121 @@ def main():
 
     output_dim = y_train[0].shape[1:]
     n_notes = x_train[0].shape[-1]
-    batch_size = 32
+    batch_size = 1
+    latent_dim = 32
 
     model = Sequential()
-    model.add(LSTM(512, return_sequences=True, input_shape=(max_len, n_notes)))
-    model.add(Dropout(0.3))
-    model.add(LSTM(512, return_sequences=True))
-    model.add(Dropout(0.3))
-    model.add(LSTM(512, return_sequences=True))
-    model.add(Dense(256))
-    model.add(Dropout(0.3))
-    model.add(Dense(n_notes))
-    model.add(Activation('softmax'))
+    model.add(LSTM(latent_dim, batch_input_shape=(batch_size, max_len, n_notes), return_sequences=True, stateful=True, name='encoder'))
+    model.add(TimeDistributed(Dense(n_notes)))
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    model.summary()
+
+    epochs = 20
+    for e in range(epochs):
+        x = x_train[e % len(x_train)].reshape((1, max_len, n_notes))
+        y = x_train[e % len(x_train)].reshape((1, max_len, n_notes))
+        val_x = x_val[e % len(x_val)].reshape((1, max_len, n_notes))
+        val_y = y_val[e % len(y_val)].reshape((1, max_len, n_notes))
+
+        hist = model.fit(
+            x,
+            y,
+            epochs=1,
+            validation_data=(val_x, val_y),
+            batch_size=batch_size,
+            verbose=1,
+        )
+        model.reset_states()
+
+    y_hat = model.predict(x_test[0].reshape((1, max_len, n_notes)))
+    song = encoder.softmax_to_midi(y_hat).flatten()
+
+    midi_converter = MidiConverter()
+    melody_and_song = [(melody[0], harmony) for melody, harmony in zip(test[0], song)]
+    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
+    original_song = train[0]
+    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
+
+    plt.plot(hist.history['loss'])
+    plt.plot(hist.history['val_loss'])
+    plt.legend()
+    plt.show()
+
+    """
+    # seq2seq
+    encoder_inputs = Input(shape=(None, n_notes))
+    encoder = LSTM(latent_dim, return_sequences=False, return_state=True)
+    encoder_outputs, state_h, state_c = encoder(encoder_inputs)
+    encoder_states = [state_h, state_c]
+
+    decoder_inputs = Input(shape=(None, n_notes))
+    decoder = LSTM(latent_dim, return_sequences=True, return_state=True)
+    decoder_outputs, _, _ = decoder(decoder_inputs, initial_state=encoder_states)
+    decoder_dense = Dense(n_notes, activation='softmax')
+    decoder_outputs = decoder_dense(decoder_outputs)
+    model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     model.summary()
     #tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
 
-    # We train separately on each song, but the weights are maintained.
-    history = {"loss": [], "val_loss": []}
-    epochs = 10
-    for epoch in tqdm(range(epochs), desc="Epoch"):
-        for i in range(len(x_train)):
-            melody, harmony, val_melody, val_harmony = (
-                x_train[i],
-                y_train[i],
-                x_val[i % len(x_val)],
-                y_val[i % len(y_val)],
-            )
-            melody = melody.reshape((1, max_len, 46))
-            harmony = harmony.reshape((1, max_len, 46))
-            val_melody = val_melody.reshape((1, max_len, 46))
-            val_harmony = val_harmony.reshape((1, max_len, 46))
+    print('Begin training...')
+    hist = model.fit(
+        [x_train, y_train],
+        target_train,
+        epochs=1,
+        validation_data=([x_val, y_val], target_val),
+        batch_size=batch_size,
+        verbose=0,
+    )
+    print('Finish training...')
+    
+    # inference model
+    encoder_model = Model(encoder_inputs, encoder_states)
+    
+    decoder_state_input_h = Input(shape=(latent_dim,))
+    decoder_state_input_c = Input(shape=(latent_dim,))
+    decoder_state_inputs = [decoder_state_input_h, decoder_state_input_c]
+    decoder_outputs, state_h, state_c = decoder(decoder_inputs, initial_state=decoder_state_inputs)
+    decoder_states = [state_h, state_c]
+    decoder_outputs = decoder_dense(decoder_outputs)
+    decoder_model = Model(
+        [decoder_inputs] + decoder_state_inputs,
+        [decoder_outputs] + decoder_states
+    )
 
-            hist = model.fit(
-                melody,
-                harmony,
-                epochs=4,
-                validation_data=(val_melody, val_harmony),
-                batch_size=batch_size,
-                verbose=0,
-            )
-            for loss in hist.history["loss"]:
-                if not history["loss"]:
-                    history["loss"].append(loss)
-                history["loss"].append(history["loss"][-1] * .999 + loss * .001)
-            for val_loss in hist.history["val_loss"]:
-                if not history["val_loss"]:
-                    history["val_loss"].append(val_loss)
-                history["val_loss"].append(history["val_loss"][-1]*.999+val_loss*.001)
-            model.reset_states()
+    print(x_train[0].shape)
+    input_seq = x_train[0].reshape((1, max_len-1, 46))
+    print(input_seq.shape)
+    # encode to state vector
+    states_value = encoder_model.predict(input_seq)
+
+    target_seq = np.zeros((1, 1, n_notes))
+    target_seq[0, 0, 0] = 1
+
+    stop_condition = False
+    decoded_song = []
+    while not stop_condition:
+        output_notes, h, c = decoder_model.predict(
+            [target_seq] + states_value
+        )
+
+        sampled_note_index = np.argmax(output_notes[0, -1, :])
+        note = np.zeros((max_len, n_notes))
+        note[sampled_note_index] = 1
+        decoded_song.append(note)
+        print(sampled_note_index)
+
+
+    plt.plot(hist.history['loss'])
+    plt.plot(hist.history['val_loss'])
+    plt.legend()
+    plt.show()
+    """
+
     model.save_weights("model.h5")
 
+    """
     y_hat = model.predict(x_train[0].reshape((1, 100, 46)))
     song = encoder.softmax_to_midi(y_hat).flatten()
 
@@ -194,11 +264,7 @@ def main():
     midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
     original_song = train[0]
     midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
-
-    plt.plot(history["loss"], label="Training loss")
-    plt.plot(history["val_loss"], label="Validation loss")
-    plt.legend()
-    plt.show()
+    """
 
 
 if __name__ == "__main__":
