@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Tuple, Iterable
+from midi import MidiConverter
 
 
 class OneHotEncoder:
@@ -34,6 +35,12 @@ def main():
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding='latin1')
     train, test, val = data['train'], data['test'], data['valid']
     
+    # test midi creation
+    piece = train[10]
+    #test3 = [(harmony[0],) for harmony in piece]
+    midi_converter = MidiConverter()
+    midi_converter.convert_to_midi(piece, 'test', resolution=1/4, tempo=60)
+
     encoder = OneHotEncoder(train, test, val)
     raw_song = train[0]
     raw_song[0,0] = np.nan
