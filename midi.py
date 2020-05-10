@@ -27,3 +27,8 @@ class MidiConverter:
         with open(f"{name}.mid", "wb") as output_file:
             midi_file.writeFile(output_file)
 
+
+    def convert_from_midi(self, file):
+        return np.load(file, allow_pickle=True, encoding="latin1")         
+        
+        

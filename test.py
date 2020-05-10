@@ -136,15 +136,25 @@ class OneHotEncoder:
 
 
 def main():
-    data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
-    train, test, val = data["train"], data["test"], data["valid"]
+    midi_converter = MidiConverter()
+    data = midi_converter.convert_from_midi("data/jsb-chorales-8th.pkl")  
+    train = np.array([np.array([np.float16(y) for y in x]) for x in data["train"]])
+    test = np.array([np.array([np.float16(y) for y in x]) for x in data["test"]])
+    val = np.array([np.array([np.float16(y) for y in x]) for x in data["valid"]])  
 
+    data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")    
+    train, test, val = data["train"], data["test"], data["valid"]
+    
     max_len = max(
         map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )    
+    print(max_len)
+    
     for dataset in (train, test, val):
         for i, piece in enumerate(dataset):
-            padded = np.nan * np.ones((max_len, 4))
+            padded = np.nan * np.ones((max_len, 4))   
+            print(padded)
+            print(piece.shape[0])            
             padded[: piece.shape[0], :] = piece
             dataset[i] = padded
 
