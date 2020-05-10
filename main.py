@@ -11,9 +11,10 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras import Model, Sequential
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from sklearn.preprocessing import StandardScaler
-from itertools import cycle
+from sklearn.utils import shuffle
+from models import BachNet
+from dataclasses import dataclass
+import os
 
 from midi import MidiConverter
 import sys
@@ -46,9 +47,11 @@ class OneHotEncoder:
                 [
                     max([np.nanmax(piece) for piece in dataset])
                     for dataset in (train, test, val)
+
                 ]
             )
         )
+        self.max_song_len = max([song.shape[0] for dataset in (train, test, val) for song in dataset])
         self.n_notes = self.highest - self.lowest + 1
 
     def encode_song(self, piece: Iterable[Tuple[float]]) -> np.ndarray:
@@ -61,15 +64,15 @@ class OneHotEncoder:
         """Convert a midi note to one-hot encoding in shape (K,)"""
         one_hot = np.zeros((self.highest - self.lowest + 1,))
         if np.isnan(note):
-            return one_hot
+            one_hot[-1] = 1
         else:
             one_hot[int(note) - self.lowest] = 1
         return one_hot
 
     def one_hot_to_midi(self, one_hot: np.ndarray) -> float:
-        nonzero = np.nonzero(one_hot)
-        if not nonzero:
+        if one_hot[-1] == 1:
             return np.nan
+        nonzero = np.nonzero(one_hot)
         idx = nonzero[0].item()
         return float(idx) + self.lowest
 
@@ -78,105 +81,165 @@ class OneHotEncoder:
             [[self.one_hot_to_midi(note) for note in beat] for beat in piece]
         )
 
-    def softmax_to_midi(self, softmax: np.ndarray) -> float:
-        one_hot = np.asarray(
-            [
-                [
-                    self.midi_note_one_hot(np.random.choice(self.n_notes, p=voice))
-                    for voice in beat
-                ]
-                for beat in softmax
-            ]
-        )
-        return self.decode_song(one_hot)
+    def softmax_to_midi(self, softmax: np.ndarray, mode='argmax') -> float:
+        if mode == 'beam':
+            pass
+        else:
+            decoded = np.zeros(softmax.shape[:-1])
+            for i, beat in enumerate(softmax):
+                for j, voice in enumerate(beat):
+                    if mode == 'argmax':
+                        pred = np.argmax(voice)
+                    elif mode == 'random':
+                        pred = np.random.choice(self.n_notes, p=voice)
+                    note = pred + self.lowest if pred != len(voice) - 1 else np.nan
+                    decoded[i,j] = note
+        return decoded
 
 
-def main():
+def augment_data(*datasets):
+    all_songs = np.concatenate(datasets)
+    all_tones = {
+        "s": [x for song in all_songs for x in song[:, 0]],
+        "a": [x for song in all_songs for x in song[:, 1]],
+        "t": [x for song in all_songs for x in song[:, 2]],
+        "b": [x for song in all_songs for x in song[:, 3]],
+    }
+    soprano_range = np.nanmin(all_tones["s"]), np.nanmax(all_tones["s"])
+    alto_range = np.nanmin(all_tones["a"]), np.nanmax(all_tones["a"])
+    tenor_range = np.nanmin(all_tones["t"]), np.nanmax(all_tones["t"])
+    bass_range = np.nanmin(all_tones["b"]), np.nanmax(all_tones["b"])
+    vocal_ranges = {0: soprano_range, 1: alto_range, 2: tenor_range, 3: bass_range}
+
+    def valid_range(song:np.ndarray) -> bool:
+        for voice, (min_range, max_range) in vocal_ranges.items():
+            if np.nanmin(song[:, voice]) < min_range or np.nanmax(song[:, voice]) > max_range:
+                return False
+        return True
+
+    augmented_datasets = []
+    for dataset in datasets:
+        augmented_data = []
+        for song in dataset:
+            transpositions = filter(valid_range, map(lambda t: song + t, range(-12,12)))
+            augmented_data += list(transpositions)
+        augmented_datasets.append(augmented_data)
+
+    return augmented_datasets
+
+
+@dataclass
+class Dataset:
+    x_train: np.ndarray
+    y_train: np.ndarray
+    x_test: np.ndarray
+    y_test: np.ndarray
+    x_val: np.ndarray
+    y_val: np.ndarray
+    encoder: OneHotEncoder
+
+
+def load_data(shuffle_data=False, augment=False, mode='pad') -> Dataset:
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
     train, test, val = data["train"], data["test"], data["valid"]
 
     max_len = max(
         map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
     )
+    min_len = min(
+        map(lambda dataset: min(map(lambda x: x.shape[0], dataset)), (train, test, val))
+    )
     # for dataset in (train, test, val):
     #     for i, piece in enumerate(dataset):
     #         padded = np.nan * np.ones((max_len, 4))
     #         padded[: piece.shape[0], :] = piece
     #         dataset[i] = padded
-
+    if augment:
+        train, test, val = augment_data(train, test, val)
     encoder = OneHotEncoder(train, test, val)
+
     one_hot_train, one_hot_test, one_hot_val = [
         [encoder.encode_song(x) for x in dataset] for dataset in (train, test, val)
     ]
+    # Cut to min length
+    if mode == 'pad':
+        # Pad with rests
+        for dataset in (one_hot_train, one_hot_test, one_hot_val):
+            for i, piece in enumerate(dataset):
+                padded = np.zeros((max_len, *piece.shape[1:]))
+                padded[: piece.shape[0], :, :] = piece
+                padded[piece.shape[0] :,:, -1] = 1
+                dataset[i] = padded
+    elif mode == 'crop':
+        for dataset in (one_hot_train, one_hot_test, one_hot_val):
+            for i, piece in enumerate(dataset):
+                dataset[i] = piece[:min_len]
+    one_hot_train = np.asarray(one_hot_train)
+    one_hot_test = np.asarray(one_hot_test)
+    one_hot_val = np.asarray(one_hot_val)
 
     x_train, x_test, x_val = [
-        [x[:, 0:1, :] for x in dataset]
+        dataset[:,:,0,:]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
     y_train, y_test, y_val = [
-        [y[:, 1:, :] for y in dataset]
+        dataset[:,:,1:,:]
         for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
-    output_dim = y_train[0].shape[1:]
-    n_notes = x_train[0].shape[-1]
-    batch_size = max_len
+    x = np.concatenate((x_train, x_test, x_val))
+    y = np.concatenate((y_train, y_test, y_val))
+    if shuffle_data:
+        x, y = shuffle(x,y)
+    return x, y, encoder
+
+
+def main():
+    x, y, encoder = load_data(shuffle_data=True, augment=True, mode='crop')
+    output_dim = y[0].shape[1:]
+    n_notes = x[0].shape[-1]
 
     latent_unit_count = 1024
-    model = Sequential()
-    model.add(LSTM(units=latent_unit_count, input_shape=(1, n_notes), name='encoder'))
-    # value mode
-    model.add(Reshape((1, latent_unit_count)))
-    model.add(LSTM(units=latent_unit_count, return_sequences=True, name='decoder'))
-    # sequence mode
-    model.add(Dense(n_notes * 3))
-    model.add(Reshape((3, n_notes)))
-    model.add(Activation('softmax'))
+    model = BachNet(latent_unit_count)
+    _ = model(x[0:1])
     model.compile(loss="categorical_crossentropy", optimizer="adam")
     model.summary()
-    tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR')
+    tf.keras.utils.plot_model(model, to_file='model.png', dpi=300, show_shapes=True, show_layer_names=True, rankdir='LR', expand_nested=True)
 
-    # We train separately on each song, but the weights are maintained.
-    history = {"loss": [], "val_loss": []}
-    epochs = 5
-    for epoch in tqdm(range(epochs), desc="Epoch"):
-        for i in range(len(x_train)):
-            melody, harmony, val_melody, val_harmony = (
-                x_train[i],
-                y_train[i],
-                x_val[i % len(x_val)],
-                y_val[i % len(y_val)],
-            )
-            hist = model.fit(
-                melody,
-                harmony,
-                epochs=5,
-                validation_data=(val_melody, val_harmony),
-                batch_size=max_len,
-                verbose=0,
-            )
-            for loss in hist.history["loss"]:
-                if not history["loss"]:
-                    history["loss"].append(loss)
-                history["loss"].append(history["loss"][-1] * .999 + loss * .001)
-            for val_loss in hist.history["val_loss"]:
-                if not history["val_loss"]:
-                    history["val_loss"].append(val_loss)
-                history["val_loss"].append(history["val_loss"][-1]*.999+val_loss*.001)
-            model.reset_states()
+    checkpoint_dir = './training_checkpoints'
+    checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
+    callbacks = [
+        # tf.keras.callbacks.EarlyStopping(patience=5),
+        tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir+'/model.{epoch:02d}-{val_loss:.2f}.h5', monitor='val_loss'),
+        # tf.keras.callbacks.TensorBoard(log_dir='./logs'),
+    ]
+    EPOCHS = 100
+    BATCH_SIZE = 64
+    validation_split = .2
+    validation_idx = int(x.shape[0] * (1 - validation_split))
+    training_data = tf.data.Dataset.from_tensor_slices((x[:validation_idx], y[:validation_idx]))
+    training_data = training_data.batch(BATCH_SIZE)
+    validation_data = tf.data.Dataset.from_tensor_slices((x[validation_idx:], y[validation_idx:]))
+    validation_data = validation_data.batch(BATCH_SIZE)
+
+    # model.load_weights('model.11-1.40.h5')
+    hist = model.fit(training_data, callbacks=callbacks, epochs=EPOCHS, validation_data=validation_data)
     model.save_weights("model.h5")
 
-    y_hat = model.predict(x_train[0])
-    song = encoder.softmax_to_midi(y_hat)
-
-    midi_converter = MidiConverter()
-    melody_and_song = [(melody[0], notes[0], notes[1], notes[2]) for melody, notes in zip(train[0], song)]
-    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
-    original_song = train[0]
-    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
-
-    plt.plot(history["loss"], label="Training loss")
-    plt.plot(history["val_loss"], label="Validation loss")
+    plt.plot(hist.history["loss"], label="Training loss")
+    plt.plot(hist.history["val_loss"], label="Validation loss")
     plt.legend()
+    plt.savefig('model_loss.png', dpi=300)
+
+    y_hat = model.predict(x[0:1])[0]
+    song = encoder.softmax_to_midi(y_hat, mode='argmax')
+    
+    midi_converter = MidiConverter()
+    original_melody = encoder.softmax_to_midi(x[0][:, None, :])
+    original_harmony = encoder.softmax_to_midi(y[0])
+    melody_and_song = np.concatenate((original_melody, song), axis=1)
+    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
+    original_song = np.concatenate((original_melody, original_harmony), axis=1)
+    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
     plt.show()
 
 
