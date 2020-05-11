@@ -15,6 +15,7 @@ from sklearn.utils import shuffle
 from trainer.models import BachNet, Encoder, Decoder, BahdanauAttention
 from dataclasses import dataclass
 import os
+from io import BytesIO
 import json
 from tensorflow.python.lib.io import file_io
 import argparse
@@ -143,8 +144,10 @@ class Dataset:
     encoder: OneHotEncoder
 
 
-def load_data(shuffle_data=False, augment=False, mode='pad') -> Dataset:
-    data = np.load("trainer/data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
+def load_data(job_dir, shuffle_data=False, augment=False, mode='pad') -> Dataset:
+    f = BytesIO(file_io.read_file_to_string(f"{job_dir}Jsb16thSeparated.npz", binary_mode=True))
+    data = np.load(f, allow_pickle=True, encoding="latin1")
+
     train, test, val = data["train"], data["test"], data["valid"]
 
     max_len = max(
@@ -198,7 +201,7 @@ def load_data(shuffle_data=False, augment=False, mode='pad') -> Dataset:
 
 def gcloud_save_model(model, path, job_dir):
     # save the model on to google cloud storage
-    tf.keras.save_model(model, path)
+    tf.keras.save_model(model, path, save_format='tf')
     # model.save_weights(path)
     with file_io.FileIO(path, mode='r') as input_f:
         with file_io.FileIO(job_dir + f'/{path}', mode='w+') as output_f:
@@ -209,7 +212,7 @@ def main(job_dir,**args):
     EPOCHS = 25
     BATCH_SIZE = 8
 
-    x, y, dataset_encoder = load_data(shuffle_data=True, augment=True, mode='crop')
+    x, y, dataset_encoder = load_data(job_dir, shuffle_data=True, augment=True, mode='crop')
     n_songs = x.shape[0]
     song_len, n_notes = x[0].shape
     validation_split = .2
