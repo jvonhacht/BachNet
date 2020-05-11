@@ -199,8 +199,8 @@ def load_data(shuffle_data=False, augment=False, mode='pad') -> Dataset:
 
 def main():
     latent_unit_count = 256
-    EPOCHS = 25
-    BATCH_SIZE = 8
+    EPOCHS = 10
+    BATCH_SIZE = 4
 
     x, y, dataset_encoder = load_data(shuffle_data=True, augment=True, mode='crop')
     n_songs = x.shape[0]
@@ -224,14 +224,14 @@ def main():
         loss_ = loss_object(real, pred)
         return tf.reduce_mean(loss_, axis=None)
 
-    # @tf.function # BUGGY ON MY MACHINE
+    @tf.function # BUGGY ON MY MACHINE
     def train_step(inp, targ, enc_hidden, mode='train'):
         loss = 0
         with tf.GradientTape() as tape:
             enc_output, enc_hidden = encoder(inp, enc_hidden)
             dec_hidden = enc_hidden
             # Begin with silence?
-            dec_input = tf.expand_dims([[dataset_encoder.midi_note_one_hot(np.nan)]*3] * BATCH_SIZE, 1)
+            dec_input = tf.expand_dims(tf.convert_to_tensor([[dataset_encoder.midi_note_one_hot(np.nan)]*3] * BATCH_SIZE), 1)
             # Teacher forcing - feeding the target as the next input
             for t in range(1, targ.shape[1]):
                 # passing enc_output to the decoder
@@ -280,8 +280,21 @@ def main():
     steps_per_epoch = validation_idx // BATCH_SIZE
     val_steps_per_epoch = (n_songs - validation_idx) // BATCH_SIZE
 
+    # initialize models
     loss_history = defaultdict(list)
-    for epoch in range(EPOCHS):
+    initial_epoch = 0
+    if os.path.exists('encoder.h5'):
+        enc_hidden = encoder.initialize_hidden_state()
+        inp, targ = next(iter(training_data))
+        train_step(inp, targ, enc_hidden)
+        encoder.load_weights('encoder.h5')
+        decoder.load_weights('decoder.h5')
+        with open('history.json', 'r') as hist:
+            past_losses = json.load(hist)
+        for k, v in past_losses.items():
+            loss_history[k] = v
+        initial_epoch = max(map(int, iter(loss_history))) + 1
+    for epoch in range(initial_epoch, EPOCHS):
         start = time.time()
         enc_hidden = encoder.initialize_hidden_state()
         total_loss = 0
@@ -304,9 +317,6 @@ def main():
         decoder.save_weights('decoder.h5')
 
     # Save weights
-    enc_hidden = encoder.initialize_hidden_state()
-    inp, targ = next(iter(training_data))
-    train_step(inp, targ, enc_hidden)
     encoder.save_weights('encoder.h5')
     decoder.save_weights('decoder.h5')
     y_hats, *_, softmaxes = harmonize(x[0:BATCH_SIZE])
