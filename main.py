@@ -224,14 +224,14 @@ def main():
         loss_ = loss_object(real, pred)
         return tf.reduce_mean(loss_, axis=None)
 
-    @tf.function # BUGGY ON MY MACHINE
+    @tf.function
     def train_step(inp, targ, enc_hidden, mode='train'):
         loss = 0
         with tf.GradientTape() as tape:
             enc_output, enc_hidden = encoder(inp, enc_hidden)
             dec_hidden = enc_hidden
             # Begin with silence?
-            dec_input = tf.expand_dims(tf.convert_to_tensor([[dataset_encoder.midi_note_one_hot(np.nan)]*3] * BATCH_SIZE), 1)
+            dec_input = tf.expand_dims(np.asarray([[dataset_encoder.midi_note_one_hot(np.nan)]*3] * BATCH_SIZE), 1)
             # Teacher forcing - feeding the target as the next input
             for t in range(1, targ.shape[1]):
                 # passing enc_output to the decoder
