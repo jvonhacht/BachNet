@@ -19,10 +19,8 @@ import json
 from tensorflow.python.lib.io import file_io
 import argparse
 
-from trainer.midi import MidiConverter
 import sys
 import time
-from tqdm import tqdm
 from collections import defaultdict
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -200,7 +198,8 @@ def load_data(shuffle_data=False, augment=False, mode='pad') -> Dataset:
 
 def gcloud_save_model(model, path, job_dir):
     # save the model on to google cloud storage
-    model.save_weights(path)
+    tf.keras.save_model(model, path)
+    # model.save_weights(path)
     with file_io.FileIO(path, mode='r') as input_f:
         with file_io.FileIO(job_dir + f'/{path}', mode='w+') as output_f:
             output_f.write(input_f.read())
@@ -293,11 +292,9 @@ def main(job_dir,**args):
         start = time.time()
         enc_hidden = encoder.initialize_hidden_state()
         total_loss = 0
-        for batch, (inp, targ) in tqdm(enumerate(training_data.take(steps_per_epoch)), total=steps_per_epoch, desc=f"Training epoch {epoch+1}"):
+        for batch, (inp, targ) in enumerate(training_data.take(steps_per_epoch)):
             batch_loss = train_step(inp, targ, enc_hidden)
             total_loss += batch_loss
-            tqdm.write(f"Current loss: {total_loss/batch:.4f}")
-            loss_history[epoch].append(float(batch_loss.numpy()))
         total_val_loss = 0
         with open('history.json', 'w') as out:
             json.dump(loss_history, out)
@@ -307,31 +304,20 @@ def main(job_dir,**args):
         #     *_, softmax = harmonize()
         #     batch_loss = train_step(inp, targ, enc_hidden, mode='test')
         #     total_val_loss += batch_loss
-        print(f"Epoch {epoch+1} Loss {total_loss/steps_per_epoch:.4f} Validation loss {total_val_loss/val_steps_per_epoch:.4f} Took {(time.time()-start):.1f}s")
+        tf.print(f"Epoch {epoch+1} Loss {total_loss/steps_per_epoch:.4f} Validation loss {total_val_loss/val_steps_per_epoch:.4f} Took {(time.time()-start):.1f}s")
         encoder.save_weights('encoder.h5')
         decoder.save_weights('decoder.h5')
 
     # Save weights
-    enc_hidden = encoder.initialize_hidden_state()
-    inp, targ = next(iter(training_data))
-    train_step(inp, targ, enc_hidden)
+    # enc_hidden = encoder.initialize_hidden_state()
+    # inp, targ = next(iter(training_data))
+    # train_step(inp, targ, enc_hidden)
 
     # save model to google cloud storage
     gcloud_save_model(encoder, 'encoder.h5', job_dir)
     gcloud_save_model(decoder, 'decoder.h5', job_dir)
-
-    y_hats, *_, softmaxes = harmonize(x[0:BATCH_SIZE])
-    song = dataset_encoder.softmax_to_midi(softmaxes[0], mode='argmax')
     
-    midi_converter = MidiConverter()
-    original_melody = dataset_encoder.softmax_to_midi(x[0][:, None, :])
-    original_harmony = dataset_encoder.softmax_to_midi(y[0])
-    melody_and_song = np.concatenate((original_melody, song), axis=1)
-    midi_converter.convert_to_midi(melody_and_song, 'model_out', resolution=1/4, tempo=60)
-    original_song = np.concatenate((original_melody, original_harmony), axis=1)
-    midi_converter.convert_to_midi(original_song, 'original_out', resolution=1/4, tempo=60)
-    #plt.show()
-
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
