@@ -22,6 +22,7 @@ import sys
 from sklearn.utils import shuffle
 import os
 import json
+from melodies import happy_birthday
 
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -194,11 +195,12 @@ def load_data(shuffle_data=False, augment=False, mode="pad"):
 
 
 def main():
-    latent_unit_count = 512
+    latent_unit_count = 1024
     EPOCHS = 500
-    BATCH_SIZE = 64
+    BATCH_SIZE = 16
+    dropout_rate = .1
 
-    output_dir = f"{latent_unit_count}_units_{BATCH_SIZE}_batch"
+    output_dir = f"{latent_unit_count}_units_{BATCH_SIZE}_batch_{dropout_rate}_dropout"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -218,13 +220,14 @@ def main():
     # validation_idx = int(n_songs * (1 - validation_split))
     # train_data = data_x[:validation_idx], data_y[:validation_idx]
     # val_data = data_x[validation_idx:], data_y[validation_idx:]
-
+    
     inputs = Input(shape=(song_len, n_notes), name="melody_input")
     input_encoder = GRU(
         units=latent_unit_count,
         return_sequences=True,
         return_state=True,
         name="melody_encoder",
+        dropout=dropout_rate
     )
     x, input_state = input_encoder(inputs)
     alto_encoder = GRU(
@@ -232,30 +235,33 @@ def main():
         return_sequences=True,
         return_state=True,
         name="alto_encoder",
+        dropout=dropout_rate
     )
     tenor_encoder = GRU(
         units=latent_unit_count,
         return_sequences=True,
         return_state=True,
         name="tenor_encoder",
+        dropout=dropout_rate
     )
     bass_encoder = GRU(
         units=latent_unit_count,
         return_sequences=True,
         return_state=True,
         name="bass_encoder",
+        dropout=dropout_rate
     )
     a, a_state = alto_encoder(x, initial_state=input_state)
     t, t_state = tenor_encoder(x, initial_state=input_state)
     b, b_state = bass_encoder(x, initial_state=input_state)
     alto_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="alto_decoder"
+        units=latent_unit_count, return_sequences=True, name="alto_decoder",dropout=dropout_rate
     )
     tenor_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="tenor_decoder"
+        units=latent_unit_count, return_sequences=True, name="tenor_decoder",dropout=dropout_rate
     )
     bass_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="bass_decoder"
+        units=latent_unit_count, return_sequences=True, name="bass_decoder",dropout=dropout_rate
     )
     a = alto_decoder(a, initial_state=a_state)
     t = tenor_decoder(t, initial_state=t_state)
@@ -282,7 +288,7 @@ def main():
     )
 
     callbacks = [
-        tf.keras.callbacks.EarlyStopping(patience=5),
+        tf.keras.callbacks.EarlyStopping(patience=3),
         # tf.keras.callbacks.ModelCheckpoint(
         #     filepath=path("model.{epoch:02d}-{val_loss:.2f}.h5"),
         #     monitor="val_loss",
@@ -297,6 +303,7 @@ def main():
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
         callbacks=callbacks,
+        shuffle=True,
     )
     model.save(path("final_model.h5"))
 
