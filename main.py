@@ -141,9 +141,19 @@ def augment_data(*datasets):
     return augmented_datasets
 
 
-def load_data(shuffle_data=False, augment=False, mode="pad"):
+def load_data(shuffle_data=False, augment=False, mode="pad", subdivision="16th"):
     data = np.load("data/Jsb16thSeparated.npz", allow_pickle=True, encoding="latin1")
     train, test, val = data["train"], data["test"], data["valid"]
+    if subdivision == "8th":
+        train, test, val = [
+            np.asarray([piece[::2] for piece in dataset])
+            for dataset in (train, test, val)
+        ]
+    if subdivision == "4th":
+        train, test, val = [
+            np.asarray([piece[::4] for piece in dataset])
+            for dataset in (train, test, val)
+        ]
 
     max_len = max(
         map(lambda dataset: max(map(lambda x: x.shape[0], dataset)), (train, test, val))
@@ -173,9 +183,19 @@ def load_data(shuffle_data=False, augment=False, mode="pad"):
                 padded[piece.shape[0] :, :, -1] = 1
                 dataset[i] = padded
     elif mode == "crop":
-        for dataset in (one_hot_train, one_hot_test, one_hot_val):
+        for use_offset, dataset in ((True,one_hot_train), (False,one_hot_test), (False, one_hot_val)):
             for i, piece in enumerate(dataset):
-                dataset[i] = piece[:min_len]
+                if use_offset:
+                    dataset[i] = [piece[:min_len]]
+                    # Add all subsections of a piece with one measure intervals
+                    start_idx = min_len
+                    while start_idx + min_len < piece.shape[0]:
+                        dataset[i].append(piece[start_idx : start_idx + min_len])
+                        start_idx += min_len
+                else:
+                    dataset[i] = piece[:min_len]
+        one_hot_train = [subsegment for subsegments in one_hot_train for subsegment in subsegments]
+        
     one_hot_train = np.asarray(one_hot_train, dtype="float32")
     one_hot_test = np.asarray(one_hot_test, dtype="float32")
     one_hot_val = np.asarray(one_hot_val, dtype="float32")
@@ -186,40 +206,54 @@ def load_data(shuffle_data=False, augment=False, mode="pad"):
     y_train, y_test, y_val = [
         dataset[:, :, 1:, :] for dataset in (one_hot_train, one_hot_test, one_hot_val)
     ]
-    x = np.concatenate((x_train, x_test, x_val))
-    y = np.concatenate((y_train, y_test, y_val))
     if shuffle_data:
-        x, y = shuffle(x, y)
-    return x, y, encoder
+        x_train, y_train = shuffle(x_train, y_train)
+    return x_train, y_train, x_val, y_val, x_test, y_test,  encoder
 
+
+def data_generator(x, y, batch_size):
+    i = 0
+    n_batches = x.shape[0] // batch_size
+    while True:
+        i %= n_batches
+        yield x[i * batch_size : (i + 1) * batch_size], y[i * batch_size : (i + 1) * batch_size]
+        i+=1
 
 def main():
-    latent_unit_count = 1024
+    latent_unit_count = 512
     EPOCHS = 500
-    BATCH_SIZE = 16
-    dropout_rate = .1
+    BATCH_SIZE = 96
+    dropout_rate = 0.2
+    subdivision = "16th"
+    optimizer = "adam"
+    mode = "crop"
 
-    output_dir = f"{latent_unit_count}_units_{BATCH_SIZE}_batch_{dropout_rate}_dropout"
+    output_dir = f"aug_{optimizer}_{mode}_{subdivision}_{latent_unit_count}_units_{BATCH_SIZE}_batch_{dropout_rate}_dropout"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     path = lambda x: os.path.join(output_dir, x)
 
-    data_x, data_y, dataset_encoder = load_data(
-        shuffle_data=True, augment=True, mode="crop"
+    train_x, train_y, val_x, val_y, test_x, test_y, dataset_encoder = load_data(
+        shuffle_data=True, augment=True, mode=mode, subdivision=subdivision
     )
-    total_n_songs = data_x.shape[0]
-    validation_split = 0.2
-    test_split = 0.1
-    test_split_idx = int(total_n_songs * (1 - test_split))
-    test_x, test_y = data_x[test_split_idx:], data_y[test_split_idx:]
-    data_x, data_y = data_x[:test_split_idx], data_y[:test_split_idx]
-    n_songs, song_len, n_notes = data_x.shape
+    # total_n_songs = train_x.shape[0]
+    # validation_split = 0.2
+    # test_split = 0.1
+    # test_split_idx = int(total_n_songs * (1 - test_split))
+    # test_x, test_y = data_x[test_split_idx:], data_y[test_split_idx:]
+    # data_x, data_y = data_x[:test_split_idx], data_y[:test_split_idx]
+    # validation_split_idx = int(data_x.shape[0] * validation_split)
+    # val_x, val_y = data_x[:validation_split_idx], data_y[:validation_split_idx]
+    # train_x, train_y = data_x[validation_split_idx:], data_y[validation_split_idx:]
+    val_generator = data_generator(val_x,val_y,BATCH_SIZE)
+    train_generator = data_generator(train_x,train_y,BATCH_SIZE)
+    n_songs, song_len, n_notes = train_x.shape
 
     # validation_idx = int(n_songs * (1 - validation_split))
     # train_data = data_x[:validation_idx], data_y[:validation_idx]
     # val_data = data_x[validation_idx:], data_y[validation_idx:]
-    
+
     inputs = Input(shape=(song_len, n_notes), name="melody_input")
     input_encoder = GRU(
         units=latent_unit_count,
@@ -234,33 +268,42 @@ def main():
         return_sequences=True,
         return_state=True,
         name="alto_encoder",
-        dropout=dropout_rate
+        dropout=dropout_rate,
     )
     tenor_encoder = GRU(
         units=latent_unit_count,
         return_sequences=True,
         return_state=True,
         name="tenor_encoder",
-        dropout=dropout_rate
+        dropout=dropout_rate,
     )
     bass_encoder = GRU(
         units=latent_unit_count,
         return_sequences=True,
         return_state=True,
         name="bass_encoder",
-        dropout=dropout_rate
+        dropout=dropout_rate,
     )
     a, a_state = alto_encoder(x, initial_state=input_state)
     t, t_state = tenor_encoder(x, initial_state=input_state)
     b, b_state = bass_encoder(x, initial_state=input_state)
     alto_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="alto_decoder",dropout=dropout_rate
+        units=latent_unit_count,
+        return_sequences=True,
+        name="alto_decoder",
+        dropout=dropout_rate,
     )
     tenor_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="tenor_decoder",dropout=dropout_rate
+        units=latent_unit_count,
+        return_sequences=True,
+        name="tenor_decoder",
+        dropout=dropout_rate,
     )
     bass_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="bass_decoder",dropout=dropout_rate
+        units=latent_unit_count,
+        return_sequences=True,
+        name="bass_decoder",
+        dropout=dropout_rate,
     )
     a = alto_decoder(a, initial_state=a_state)
     t = tenor_decoder(t, initial_state=t_state)
@@ -275,7 +318,7 @@ def main():
     outputs = Activation("softmax")(x)
     model = Model(inputs=inputs, outputs=outputs, name="BachNet")
 
-    model.compile(loss="categorical_crossentropy", optimizer="adam")
+    model.compile(loss="categorical_crossentropy", optimizer=optimizer)
     model.summary()
     tf.keras.utils.plot_model(
         model,
@@ -295,14 +338,14 @@ def main():
         # ),
         # tf.keras.callbacks.TensorBoard(log_dir="./logs"),
     ]
-    hist = model.fit(
-        data_x,
-        data_y,
-        validation_split=validation_split,
-        batch_size=BATCH_SIZE,
+    hist = model.fit(train_generator,
+        steps_per_epoch=n_songs // BATCH_SIZE,
+        validation_data=(val_x, val_y),
+        validation_batch_size=BATCH_SIZE,
+        # batch_size=BATCH_SIZE,
         epochs=EPOCHS,
         callbacks=callbacks,
-        shuffle=True,
+        # shuffle=True,
     )
     model.save(path("final_model.h5"))
 
@@ -317,7 +360,7 @@ def main():
         ]
         return melody_and_song
 
-    training_melody, training_harmony = data_x[0], data_y[0]
+    training_melody, training_harmony = train_x[0], train_y[0]
     test_melody, test_harmony = test_x[0], test_y[0]
 
     train_actual = generate_song(training_melody, harmony=training_harmony)
@@ -333,9 +376,14 @@ def main():
     convert_to_midi(test_actual, path("test_actual"), resolution=1 / 4, tempo=60)
 
     from melodies import happy_birthday
+
+    if subdivision == "8th":
+        happy_birthday = happy_birthday[::2]
     one_hot_happy = dataset_encoder.encode_song(happy_birthday)
-    generated_happy_birthday = generate_song(one_hot_happy[:,0,:])
-    convert_to_midi(generated_happy_birthday, path("happy_birthday"), resolution=1/4, tempo=120)
+    generated_happy_birthday = generate_song(one_hot_happy[:, 0, :])
+    convert_to_midi(
+        generated_happy_birthday, path("happy_birthday"), resolution=1 / 4, tempo=120
+    )
 
     plt.plot(hist.history["loss"], label="Training loss")
     plt.plot(hist.history["val_loss"], label="Validation loss")
