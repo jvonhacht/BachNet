@@ -22,7 +22,6 @@ import sys
 from sklearn.utils import shuffle
 import os
 import json
-from melodies import happy_birthday
 
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -227,7 +226,7 @@ def main():
         return_sequences=True,
         return_state=True,
         name="melody_encoder",
-        dropout=dropout_rate
+        dropout=dropout_rate,
     )
     x, input_state = input_encoder(inputs)
     alto_encoder = GRU(
@@ -332,6 +331,11 @@ def main():
     convert_to_midi(train_actual, path("training_actual"), resolution=1 / 4, tempo=60)
     convert_to_midi(test_generated, path("test_generated"), resolution=1 / 4, tempo=60)
     convert_to_midi(test_actual, path("test_actual"), resolution=1 / 4, tempo=60)
+
+    from melodies import happy_birthday
+    one_hot_happy = dataset_encoder.encode_song(happy_birthday)
+    generated_happy_birthday = generate_song(one_hot_happy[:,0,:])
+    convert_to_midi(generated_happy_birthday, path("happy_birthday"), resolution=1/4, tempo=120)
 
     plt.plot(hist.history["loss"], label="Training loss")
     plt.plot(hist.history["val_loss"], label="Validation loss")
