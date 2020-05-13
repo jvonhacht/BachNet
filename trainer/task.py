@@ -180,9 +180,18 @@ def load_data(job_dir=None, gcp=False, shuffle_data=False, augment=False, mode="
                 padded[piece.shape[0] :, :, -1] = 1
                 dataset[i] = padded
     elif mode == "crop":
-        for dataset in (one_hot_train, one_hot_test, one_hot_val):
+        for use_offset, dataset in ((True,one_hot_train), (False,one_hot_test), (False, one_hot_val)):
             for i, piece in enumerate(dataset):
-                dataset[i] = piece[:min_len]
+                if use_offset:
+                    dataset[i] = [piece[:min_len]]
+                    # Add all subsections of a piece with one measure intervals
+                    start_idx = min_len
+                    while start_idx + min_len < piece.shape[0]:
+                        dataset[i].append(piece[start_idx : start_idx + min_len])
+                        start_idx += min_len
+                else:
+                    dataset[i] = piece[:min_len]
+        one_hot_train = [subsegment for subsegments in one_hot_train for subsegment in subsegments]
     one_hot_train = np.asarray(one_hot_train, dtype="float32")
     one_hot_test = np.asarray(one_hot_test, dtype="float32")
     one_hot_val = np.asarray(one_hot_val, dtype="float32")
