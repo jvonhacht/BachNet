@@ -180,18 +180,18 @@ def load_data(job_dir=None, gcp=False, shuffle_data=False, augment=False, mode="
                 padded[piece.shape[0] :, :, -1] = 1
                 dataset[i] = padded
     elif mode == "crop":
-        for use_offset, dataset in ((True,one_hot_train), (False,one_hot_test), (False, one_hot_val)):
+        for dataset in one_hot_train, one_hot_test, one_hot_val:
             for i, piece in enumerate(dataset):
-                if use_offset:
-                    dataset[i] = [piece[:min_len]]
-                    # Add all subsections of a piece with one measure intervals
-                    start_idx = min_len
-                    while start_idx + min_len < piece.shape[0]:
-                        dataset[i].append(piece[start_idx : start_idx + min_len])
-                        start_idx += min_len
-                else:
-                    dataset[i] = piece[:min_len]
-        one_hot_train = [subsegment for subsegments in one_hot_train for subsegment in subsegments]
+                dataset[i] = [piece[:min_len]]
+                # Add all non-overlapping
+                start_idx = min_len
+                while start_idx + min_len < piece.shape[0]:
+                    dataset[i].append(piece[start_idx : start_idx + min_len])
+                    start_idx += min_len
+        one_hot_train, one_hot_test, one_hot_val = [
+            [subsegment for subsegments in dataset for subsegment in subsegments]
+            for dataset in (one_hot_train, one_hot_test, one_hot_val)
+        ]
     one_hot_train = np.asarray(one_hot_train, dtype="float32")
     one_hot_test = np.asarray(one_hot_test, dtype="float32")
     one_hot_val = np.asarray(one_hot_val, dtype="float32")
@@ -308,7 +308,7 @@ def main(job_dir, **args):
         print('Graphviz/pydot not installed, skipping model plot...')
 
     callbacks = [
-        tf.keras.callbacks.EarlyStopping(patience=3),
+        tf.keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True, min_delta=0, monitor='val_loss'),
         # tf.keras.callbacks.ModelCheckpoint(
         #     filepath=path("model.{epoch:02d}-{val_loss:.2f}.h5"),
         #     monitor="val_loss",
