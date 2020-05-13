@@ -24,6 +24,7 @@ from sklearn.utils import shuffle
 import os
 import json
 import argparse
+import pickle
 
 # Fix seed for reproducibility
 tf.random.set_seed(0)
@@ -208,16 +209,27 @@ def load_data(job_dir=None, gcp=False, shuffle_data=False, augment=False, mode="
         x, y = shuffle(x, y)
     return x, y, encoder
 
-def main(job_dir, **args):
-    gcp = False
-    if 'gcp' in args:
-        gcp = (args['gcp'] == 'True')
-    latent_unit_count = 1024
-    EPOCHS = 500
-    BATCH_SIZE = 16
-    dropout_rate = .1
 
-    output_dir = f"{latent_unit_count}_units_{BATCH_SIZE}_batch_{dropout_rate}_dropout"
+def make_generator(x, y, batch_size):
+    i = 0
+    data_len = x.shape[0]
+    steps_per_epoch = data_len//batch_size
+    while True:
+        i %= steps_per_epoch
+        yield x[i * batch_size : (i + 1) * batch_size], y[i * batch_size : (i + 1) * batch_size]
+        i += 1
+
+
+def main(job_dir, **args):
+    gcp = args['gcp']
+    latent_unit_count = 512
+    EPOCHS = 500
+    BATCH_SIZE = 96
+    dropout_rate = 0.3
+    opt = 'adam'
+
+    output_dir = f"final"
+    history_name = f'training_history.json'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -226,18 +238,24 @@ def main(job_dir, **args):
     data_x, data_y, dataset_encoder = load_data(
         job_dir=job_dir, gcp=gcp, shuffle_data=True, augment=True, mode="crop"
     )
+    with open('encoder.pickle', 'wb') as f:
+        pickle.dump(dataset_encoder, f, pickle.HIGHEST_PROTOCOL)
+    sys.exit(0)
+        
     total_n_songs = data_x.shape[0]
     validation_split = 0.2
-    test_split = 0.1
-    test_split_idx = int(total_n_songs * (1 - test_split))
-    test_x, test_y = data_x[test_split_idx:], data_y[test_split_idx:]
-    data_x, data_y = data_x[:test_split_idx], data_y[:test_split_idx]
-    n_songs, song_len, n_notes = data_x.shape
+    # test_split = 0.1
+    # test_split_idx = int(total_n_songs * (1 - test_split))
+    # test_x, test_y = data_x[test_split_idx:], data_y[test_split_idx:]
+    # data_x, data_y = data_x[:test_split_idx], data_y[:test_split_idx]
 
-    # validation_idx = int(n_songs * (1 - validation_split))
-    # train_data = data_x[:validation_idx], data_y[:validation_idx]
-    # val_data = data_x[validation_idx:], data_y[validation_idx:]
-    
+    validation_idx = int(total_n_songs * (1 - validation_split))
+    train_x, train_y = data_x[:validation_idx], data_y[:validation_idx]
+    val_data = data_x[validation_idx:], data_y[validation_idx:]
+    train_gen = make_generator(data_x, data_y, BATCH_SIZE)
+    val_gen = make_generator(val_data[0], val_data[1], BATCH_SIZE)
+    n_songs, song_len, n_notes = train_x.shape
+
     inputs = Input(shape=(song_len, n_notes), name="melody_input")
     input_encoder = GRU(
         units=latent_unit_count,
@@ -272,13 +290,13 @@ def main(job_dir, **args):
     t, t_state = tenor_encoder(x, initial_state=input_state)
     b, b_state = bass_encoder(x, initial_state=input_state)
     alto_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="alto_decoder",dropout=dropout_rate
+        units=latent_unit_count, return_sequences=True, name="alto_decoder", dropout=dropout_rate
     )
     tenor_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="tenor_decoder",dropout=dropout_rate
+        units=latent_unit_count, return_sequences=True, name="tenor_decoder",dropout=dropout_rate,
     )
     bass_decoder = GRU(
-        units=latent_unit_count, return_sequences=True, name="bass_decoder",dropout=dropout_rate
+        units=latent_unit_count, return_sequences=True, name="bass_decoder",dropout=dropout_rate,
     )
     a = alto_decoder(a, initial_state=a_state)
     t = tenor_decoder(t, initial_state=t_state)
@@ -293,7 +311,7 @@ def main(job_dir, **args):
     outputs = Activation("softmax")(x)
     model = Model(inputs=inputs, outputs=outputs, name="BachNet")
 
-    model.compile(loss="categorical_crossentropy", optimizer="adam")
+    model.compile(loss="categorical_crossentropy", optimizer=opt)
     model.summary()
     try:
         tf.keras.utils.plot_model(
@@ -302,7 +320,7 @@ def main(job_dir, **args):
             dpi=300,
             show_shapes=True,
             show_layer_names=True,
-            rankdir="LR",
+            rankdir="TB",
         )
     except ImportError:
         print('Graphviz/pydot not installed, skipping model plot...')
@@ -317,16 +335,17 @@ def main(job_dir, **args):
         # tf.keras.callbacks.TensorBoard(log_dir="./logs"),
     ]
     hist = model.fit(
-        data_x,
-        data_y,
-        validation_split=validation_split,
-        batch_size=BATCH_SIZE,
+        train_gen,
+        validation_data=val_data,
+        # validation_split=validation_split,
+        steps_per_epoch=n_songs // BATCH_SIZE,
+        # batch_size=BATCH_SIZE,
         epochs=EPOCHS,
         callbacks=callbacks,
-        shuffle=True,
+        # shuffle=True,
     )
 
-    if 'gcp' in args:
+    if gcp:
         # save the model on to google cloud storage
         save_path = path('final_model.h5')
         model.save(save_path)
@@ -339,11 +358,13 @@ def main(job_dir, **args):
         model.save(path("final_model.h5"))
         plt.plot(hist.history["loss"], label="Training loss")
         plt.plot(hist.history["val_loss"], label="Validation loss")
+        plt.xlabel('Epoch')
+        plt.ylabel('Cross-entropy loss')
         plt.legend()
         plt.savefig(path("history.png"), dpi=300)
-        with open(path("history.json"), "w") as f:
+        with open(path(history_name), "w") as f:
             json.dump(
-                {"loss": hist.history["loss"], "val_loss": hist.history["val_loss"]}, f
+                {"loss": hist.history["loss"],},f #"val_loss": hist.history["val_loss"]}, f
             )
         plt.show()
 
@@ -353,12 +374,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--job-dir',
         help='GCS location to write trained models to',
-        required=True
+        required=False
     )
     parser.add_argument(
         '--gcp',
         help='Use this flag if training on gcp',
-        required=True
+        required=False
     )
     args = parser.parse_args()
     arguments = args.__dict__
