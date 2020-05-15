@@ -308,7 +308,7 @@ def main(job_dir, **args):
     x = Concatenate(axis=2)([a, t, b])
     merger = Dense(n_notes, name="fc_output")
     x = merger(x)
-    outputs = Activation("softmax")(x)
+    outputs = Activation("softmax", name="softmax")(x)
     model = Model(inputs=inputs, outputs=outputs, name="BachNet")
 
     model.compile(loss="categorical_crossentropy", optimizer=opt)
@@ -317,7 +317,7 @@ def main(job_dir, **args):
         tf.keras.utils.plot_model(
             model,
             to_file=path("model.png"),
-            dpi=300,
+            dpi=1200,
             show_shapes=True,
             show_layer_names=True,
             rankdir="TB",
@@ -325,6 +325,7 @@ def main(job_dir, **args):
     except ImportError:
         print('Graphviz/pydot not installed, skipping model plot...')
 
+    sys.exit(0)
     callbacks = [
         tf.keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True, min_delta=0, monitor='val_loss'),
         # tf.keras.callbacks.ModelCheckpoint(
