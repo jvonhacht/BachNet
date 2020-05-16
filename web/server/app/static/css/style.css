@@ -1,7 +1,8 @@
 body {
+    display: flex;
     margin: 0;
     padding: 0;
-    background:rgb(103, 103, 103);
+    background:rgb(109, 109, 109);
     font-family: 'Roboto', sans-serif;
 }
 
@@ -16,7 +17,7 @@ body {
     padding: 10px;
     background-color: white;
     font-weight: bold;
-    box-shadow: 3px 3px;
+    box-shadow: 0px 3px 5px rgb(0, 0, 0);
 }
 
 #piano {
@@ -24,30 +25,78 @@ body {
     padding: 0;  
     position: relative;    
 }
-
-button {
-    margin: 0;
-    padding: 0;
-    background-color: transparent;   
-    border-color: transparent;    
+ 
+.control_button {
+    margin-right: 10px;
+    margin-top: 10px;
+    margin-bottom: 5px;
+    background-color:white;    
+    cursor: pointer;
+    color:#000000;    
+    font-size:12px;
+    padding:4px 7px;    
+    font-weight: bold;    
+    box-shadow: 0px 3px 5px rgb(0, 0, 0);
+    float: left;
 }
 
-.white_key {    
-    margin: 0;
-    padding: 0;
+ul {
+    list-style: none;
+    display: flex;
+}
+
+ul .key {
     position: relative;
-    z-index: -1; 
+    width: 60px;
+    height: 180px;
+    border: 1px solid black;
+    border-right: none;
+    background: white;
+    border-radius: 3px;
+    box-shadow: 0px 3px 5px rgb(0, 0, 0);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    padding-bottom: 10px;
+    font-weight: bold;
 }
 
-.black_key {  
-    margin: 0;  
-    padding: 0;
-    position: absolute;      
-    z-index: 10;       
+ul .key:last-child {
+    border-right: 1px solid black;
 }
 
-img {
-    height: 400px;
-    width: auto;
+ul .black-key {
+    position: absolute;
+    top: -1px;
+    left: 37.5px;
+    width: 45px;
+    height: 120px;
+    background: black;
+    border-radius: 5px;
+    box-shadow: 0px 3px 5px rgb(0, 0, 0);
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    padding-bottom: 10px;
+    color: white;
 }
+
+#D-sharp {
+    left: 100px;
+}
+
+#F-sharp {
+    left: 220px;
+}
+
+#G-sharp {
+    left: 282px;    
+}
+
+#A-sharp {
+    left: 343px;
+}
+
 

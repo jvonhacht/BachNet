@@ -4,52 +4,70 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">    
     <meta http-equiv="x-ua-compatible" content="ie=edge">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <script src="https://unpkg.com/tone"></script>
-    <script src="{{ url_for('static', filename='javascript/model.js') }}"></script>        
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">    
+    <script src="https://unpkg.com/tone"></script>    
+    <script src="{{ url_for('static', filename='javascript/functions.js') }}"></script>        
     <title>BackNet</title>
 </head>
+<body>    
     <div id="piano_container">
         <div id="notes">
             BachNet
         </div>
-        <div id="piano">
-            <button onclick="add_note('C')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>
-            <button onclick="add_note('C#')" id="black_key">
-                <img src="{{ url_for('static', filename='img/black_key.png') }}">
-            </button>            
-            <button onclick="add_note('D')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>
-            <button onclick="add_note('D#')" id="black_key">
-                <img src="{{ url_for('static', filename='img/black_key.png') }}">
-            </button>            
-            <button onclick="add_note('E')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>
-            <button onclick="add_note('F')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>          
-            <button onclick="add_note('F#')" id="black_key">
-                <img src="{{ url_for('static', filename='img/black_key.png') }}">
-            </button>                                
-            <button onclick="add_note('G')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>          
-            <button onclick="add_note('G#')" id="black_key">
-                <img src="{{ url_for('static', filename='img/black_key.png') }}">
-            </button>                                
-            <button onclick="add_note('A')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>                      
-            <button onclick="add_note('A#')" id="black_key">
-                <img src="{{ url_for('static', filename='img/black_key.png') }}">
-            </button>          
-            <button onclick="add_note('B')" id="white_key">
-                <img src="{{ url_for('static', filename='img/white_key.png') }}">
-            </button>                                
+        <div>
+            <ul id="piano">
+                <li class="key" onclick="play_note('C')">
+                    C
+                </li>
+                <li class="black-key" onclick="play_note('C#')">                    
+                    C#
+                </li>
+                <li class="key" onclick="play_note('D')">                    
+                    D
+                </li>
+                <li class="black-key" id="D-sharp" onclick="play_note('D#')">                    
+                    D#
+                </li>
+                <li class="key" onclick="play_note('E')">
+                    E
+                </li>
+                <li class="key" onclick="play_note('F')">                    
+                    F
+                </li>
+                <li class="black-key" id="F-sharp" onclick="play_note('F#')">
+                    F#
+                </li>
+                <li class="key" onclick="play_note('G')">                 
+                    G
+                </li>
+                <li class="black-key" id="G-sharp" onclick="play_note('G#')">
+                    G#
+                </li>
+                <li class="key" onclick="play_note('A')">
+                    A
+                </li>
+                <li class="black-key" id="A-sharp" onclick="play_note('A#')">
+                    A#
+                </li>
+                <li class="key" onclick="play_note('B')">
+                    B
+                </li>
+            </ul>
         </div>
-    </div>    
+        <div id="controller">
+            <button class="control_button" onclick="add_note()"> 
+                Add note
+            </button>
+            <button class="control_button" onclick="remove_note()"> 
+                Remove note
+            </button>           
+            <button class="control_button"> 
+                Play
+            </button>              
+            <button onclick="harmonize()" class="control_button"> 
+                Harmonize
+            </button>              
+        </div>        
+    </div>      
+</body>  
 </html>
