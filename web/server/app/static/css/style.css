@@ -6,7 +6,7 @@ body {
     font-family: 'Roboto', sans-serif;
 }
 
-#piano_container {
+#piano-container {
     top: 10%;
     left: 5%;
     position: absolute;    
@@ -26,7 +26,7 @@ body {
     position: relative;    
 }
  
-.control_button {
+.control-button {
     margin-right: 10px;
     margin-top: 10px;
     margin-bottom: 5px;
