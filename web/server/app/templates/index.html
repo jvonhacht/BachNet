@@ -3,9 +3,51 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">    
-    <meta http-equiv="x-ua-compatible" content="ie=edge">    
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">    
     <title>BackNet</title>
 </head>
-<body>
-    Hello world
-</body>
+    <div id="piano_container">
+        <div id="notes">
+            BachNet
+        </div>
+        <div id="piano">
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>
+            <button id="black_key">
+                <img src="{{ url_for('static', filename='img/black_key.png') }}">
+            </button>            
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>
+            <button id="black_key">
+                <img src="{{ url_for('static', filename='img/black_key.png') }}">
+            </button>            
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>          
+            <button id="black_key">
+                <img src="{{ url_for('static', filename='img/black_key.png') }}">
+            </button>                                
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>          
+            <button id="black_key">
+                <img src="{{ url_for('static', filename='img/black_key.png') }}">
+            </button>                                
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>                      
+            <button id="black_key">
+                <img src="{{ url_for('static', filename='img/black_key.png') }}">
+            </button>          
+            <button id="white_key">
+                <img src="{{ url_for('static', filename='img/white_key.png') }}">
+            </button>                                
+        </div>
+    </div>    
+</html>

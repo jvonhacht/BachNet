@@ -1,0 +1,49 @@
+body {
+    margin: 0;
+    padding: 0;
+    background:rgb(103, 103, 103);
+    font-family: 'Roboto', sans-serif;
+}
+
+#piano_container {
+    top: 10%;
+    left: 5%;
+    position: absolute;    
+}
+
+#notes {        
+    margin-bottom: 10px;
+    padding: 10px;
+    background-color: white;
+    font-weight: bold;
+}
+
+#piano {
+    margin: 0;
+    padding: 0;    
+    position: relative;  
+}
+
+button {
+    margin: 0;
+    padding: 0;
+    background-color: transparent;   
+    border-color: transparent;
+}
+
+.white_key {    
+    margin: 0;
+    padding: 0;
+    position: relative;
+    z-index: 1;
+}
+
+.black_key {  
+    margin: 0;  
+    padding: 0;
+    position: absolute;  
+    left: 100px;     
+    top: 100px;     
+    z-index: 2;              
+}
+
