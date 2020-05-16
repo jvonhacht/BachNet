@@ -16,34 +16,38 @@ body {
     padding: 10px;
     background-color: white;
     font-weight: bold;
+    box-shadow: 3px 3px;
 }
 
 #piano {
     margin: 0;
-    padding: 0;    
-    position: relative;  
+    padding: 0;  
+    position: relative;    
 }
 
 button {
     margin: 0;
     padding: 0;
     background-color: transparent;   
-    border-color: transparent;
+    border-color: transparent;    
 }
 
 .white_key {    
     margin: 0;
     padding: 0;
     position: relative;
-    z-index: 1;
+    z-index: -1; 
 }
 
 .black_key {  
     margin: 0;  
     padding: 0;
-    position: absolute;  
-    left: 100px;     
-    top: 100px;     
-    z-index: 2;              
+    position: absolute;      
+    z-index: 10;       
+}
+
+img {
+    height: 400px;
+    width: auto;
 }
 
