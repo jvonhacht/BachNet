@@ -12,7 +12,7 @@ The project involved training a model that is capable of generating harmonies gi
 
 - Download the data from `www.github.com/czhuang/JSB-Chorales-dataset` and place the file `Jsb16thSeparated.npz` inside `trainer/data`.
 - `pip3 install -r requirements.txt`
-- To train, run `task.py`: `python3 task.py`. 
-- To generate melodies run: `python3 performer.py`. Inside the main function within the file, there is the option to change the melody to generate harmonies for. 
+- To train, run `task.py`: `python3 -m trainer/task.py`. 
+- To generate melodies run: `python3 -m trainer/performer.py`. Inside the main function within the file, there is the option to change the melody to generate harmonies for. 
 
 
